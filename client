@@ -1,0 +1,65 @@
+#!/bin/bash
+
+JAVA=$(which java)
+
+[ -z "${CLI_MIN_HEAP}" ] && export CLI_MIN_HEAP=512
+[ -z "${CLI_MAX_HEAP}" ] && export CLI_MAX_HEAP=512
+
+[ -z "${CLI_GC_OPTS}" ] && CLI_GC_OPTS="-XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=10
+    -XX:+PrintGCDetails \
+    -XX:+PrintGCApplicationStoppedTime  \
+    -XX:+UseGCLogFileRotation \
+    -XX:NumberOfGCLogFiles=5 \
+    -XX:GCLogFileSize=64m \
+    -Xloggc:/logs/dlog_gc_%p.log"
+
+
+
+[ -z "${GC_LOGGING}"] && GC_LOGGING=" -XX:+PrintGCDetails \
+    -XX:+PrintGCApplicationStoppedTime  \
+    -XX:+UseGCLogFileRotation \
+    -XX:NumberOfGCLogFiles=5 \
+    -XX:GCLogFileSize=64m \
+    -Xloggc:/logs/gc_%p.log "
+
+MEM_OPTS=" -Xms${CLI_MIN_HEAP}m -Xmx${CLI_MAX_HEAP}m "
+
+# Configure the classpath
+if grep -q StreamStorageLifecycleComponent /conf/bookkeeper.conf; then
+  BOOKIE_SERVER_MODULE=$(find /bookkeeper/lib -type f | egrep '(org.apache.bookkeeper-)?bookkeeper-server')
+else
+  BOOKIE_SERVER_MODULE=$(find /bookkeeper/lib -type f | egrep '(org.apache.bookkeeper-)?stream-storage-server')
+fi
+
+CLASSPATH="$(find /bookkeeper/lib -name '*.jar' |tr '\n' ':'|sed 's/:$//'):/logs:${BOOKIE_SERVER_MODULE}"
+
+[ -z "${NETTY_LEAK_DETECTION_LEVEL}" ] && NETTY_LEAK_DETECTION_LEVEL="disabled"
+[ -z "${NETTY_RECYCLER_MAXCAPACITY}" ] && NETTY_RECYCLER_MAXCAPACITY="1000"
+[ -z "${NETTY_RECYCLER_LINKCAPACITY}"] && NETTY_RECYCLER_LINKCAPACITY="1024"
+
+NETTY_OPTS= " -Dio.netty.leakDetectionLevel=${NETTY_LEAK_DETECTION_LEVEL} \
+  -Dio.netty.recycler.maxCapacity.default=${NETTY_RECYCLER_MAXCAPACITY} \
+  -Dio.netty.recycler.linkCapacity=${NETTY_RECYCLER_LINKCAPACITY} "
+
+LOG_OPTS=" -Dlog4j.configuration=/conf/log4j.cli.properties \
+    -Dbookkeeper.cli.root.logger='INFO,CONSOLE' \
+    -Dbookkeeper.cli.log.dir=/logs \
+    -Dbookkeeper.cli.log.file=book.log"
+
+
+CMD=$(cat EOF<<
+  ${JAVA} \
+  -Djava.net.preferIPv4Stack=true \
+  ${MEM_OPTS} \
+  ${GC_OPTS} \
+  ${GC_LOGGING} \
+  ${NETTY_OPTS} \
+  ${LOG_OPTS} \
+  -cp ${CLASSPATH}
+  ${JVM_OPTS}
+EOF
+)
+
+#one time only initialization
+${CMD} -DentryFormatterClass=org.apache.bookkeeper.util.StringEntryFormatter org.apache.bookkeeper.bookie.BookieShell -conf /conf/bk-client.conf $@

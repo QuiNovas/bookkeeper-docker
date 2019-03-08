@@ -1,0 +1,96 @@
+#!/bin/bash
+
+JAVA=$(which java)
+
+[ -z "${BOOKIE_MIN_HEAP}" ] && export BOOKIE_MIN_HEAP=1000
+[ -z "${BOOKIE_MAX_HEAP}" ] && export BOOKIE_MAX_HEAP=1000
+[ -z "${BOOKIE_MAX_DIRECT_MEMORY}" ] && BOOKIE_MAX_DIRECT_MEMORY=2000
+
+[ -z "${GC_OPTS}" ] && GC_OPTS=" -XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=10 \
+    -XX:+ParallelRefProcEnabled \
+    -XX:+UnlockExperimentalVMOptions \
+    -XX:+AggressiveOpts \
+    -XX:+DoEscapeAnalysis \
+    -XX:ParallelGCThreads=32 \
+    -XX:ConcGCThreads=32 \
+    -XX:G1NewSizePercent=50 \
+    -XX:+DisableExplicitGC \
+    -XX:-ResizePLAB "
+
+[ -z "${GC_LOGGING}"] && GC_LOGGING=" -XX:+PrintGCDetails \
+    -XX:+PrintGCApplicationStoppedTime  \
+    -XX:+UseGCLogFileRotation \
+    -XX:NumberOfGCLogFiles=5 \
+    -XX:GCLogFileSize=64m \
+    -Xloggc:/logs/gc_%p.log "
+
+MEM_OPTS=" -Xms${BOOKIE_MIN_HEAP}m -Xmx${BOOKIE_MAX_HEAP}m -XX:MaxDirectMemorySize=${BOOKIE_MAX_DIRECT_MEMORY}m "
+
+[ -z "${PROMETHEUS_PORT}" ] && PROMETHEUS_PORT=7070
+
+[ -z "${WITHOUT_PROMETHEUS}" ] && PROMETHEUS=" -javaagent:/usr/local/bin/prometheus_agent.jar=${PROMETHEUS_PORT}:/etc/prometheus/config.yml "
+
+# Configure the classpath
+if grep -q StreamStorageLifecycleComponent /conf/bookkeeper.conf; then
+  BOOKIE_SERVER_MODULE=$(find /bookkeeper/lib -type f | egrep '(org.apache.bookkeeper-)?bookkeeper-server')
+else
+  BOOKIE_SERVER_MODULE=$(find /bookkeeper/lib -type f | egrep '(org.apache.bookkeeper-)?stream-storage-server')
+fi
+CLASSPATH="$(find /bookkeeper/lib -name '*.jar' |tr '\n' ':'|sed 's/:$//'):/logs:${BOOKIE_SERVER_MODULE}"
+
+[ -z "${NETTY_LEAK_DETECTION_LEVEL}" ] && NETTY_LEAK_DETECTION_LEVEL="disabled"
+[ -z "${NETTY_RECYCLER_MAXCAPACITY}" ] && NETTY_RECYCLER_MAXCAPACITY="1000"
+[ -z "${NETTY_RECYCLER_LINKCAPACITY}"] && NETTY_RECYCLER_LINKCAPACITY="1024"
+
+NETTY_OPTS=" -Dio.netty.leakDetectionLevel=${NETTY_LEAK_DETECTION_LEVEL} \
+  -Dio.netty.recycler.maxCapacity.default=${NETTY_RECYCLER_MAXCAPACITY} \
+  -Dio.netty.recycler.linkCapacity=${NETTY_RECYCLER_LINKCAPACITY} "
+
+LOG_OPTS="-Dlog4j.configuration=/conf/log4j.properties \
+    -Dbookkeeper.root.logger='INFO,CONSOLE' \
+    -Dbookkeeper.log.dir=/logs \
+    -Dbookkeeper.log.file=bookkeeper.log"
+
+CMD=$(cat<<EOF
+  ${JAVA}
+  -Djava.net.preferIPv4Stack=true
+  ${MEM_OPTS}
+  ${GC_OPTS}
+  ${GC_LOGGING}
+  ${NETTY_OPTS}
+  ${PROMETHEUS}
+  ${LOG_OPTS}
+  -cp ${CLASSPATH}
+  ${JVM_OPTS}
+EOF
+)
+
+# For autorecovery we have to run two separate processes
+if [ -z "${DISABLE_AUTORECOVERY}" ]; then
+  $CMD org.apache.bookkeeper.server.Main --conf /conf/bookkeeper.conf &
+  MAIN_PID="$!"
+
+  $CMD org.apache.bookkeeper.replication.AutoRecoveryMain --conf /conf/bookkeeper.conf &
+  RECOVERY_PID="$!"
+  # exit if either one fails
+  while true; do
+    if ! ps aux | grep ${RECOVERY_PID} | grep -qv grep; then
+      echo "Autorecovery has crashed"
+      exit 2
+    fi
+    if ! ps aux | grep ${MAIN_PID} | grep -qv grep; then
+      echo "Bookkeeper has crashed"
+      exit 1
+    fi
+    sleep 1
+  done
+else
+  # Only one process so we will stay in the foreground
+  $CMD org.apache.bookkeeper.server.Main --conf /conf/bookkeeper.conf
+fi
+
+
+## Run on start
+elif [ ${COMMAND} == "upgrade" ]; then
+  exec ${JAVA} ${OPTS} org.apache.bookkeeper.bookie.FileSystemUpgrade --conf ${BOOKIE_CONF} $@
