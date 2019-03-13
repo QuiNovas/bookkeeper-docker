@@ -10,23 +10,22 @@ RUN set -x && \
       shadow && \
     apk add --no-cache bash \
       su-exec && \
-    mkdir /journal /ledgers /logs /conf && \
+    mkdir /journal /ledgers /logs /conf /indexes && \
     adduser -D bookkeeper && \
     cd /tmp && \
-    wget "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz" && \
-    wget "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz.asc" && \
-    wget "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz.sha512" && \
+    wget -nv "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz" && \
+    wget -nv "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz.asc" && \
+    wget -nv "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz.sha512" && \
     sha512sum -c bookkeeper-server-4.9.0-bin.tar.gz.sha512 && \
     gpg --keyserver ha.pool.sks-keyservers.net --recv-key "FD74402C" && \
     gpg --batch --verify "bookkeeper-server-4.9.0-bin.tar.gz.asc" "bookkeeper-server-4.9.0-bin.tar.gz" && \
     tar -xzf "bookkeeper-server-4.9.0-bin.tar.gz" && \
     mv bookkeeper-server-4.9.0 /bookkeeper && \
     rm -rf ./* && \
-    apk del --no-cache .build-deps
+    apk del --no-cache .build-deps && \
+    rm -f /bookkeeper/bin/*
 
 WORKDIR /bookkeeper
-
-RUN rm -f /zookeeper/bin/*
 
 COPY ./bookkeeper /bookkeeper/bin/bookkeeper
 COPY ./client /bookkeeper/bin/client
@@ -36,7 +35,7 @@ COPY ./log4j.properties /conf/log4j.properties
 COPY ./log4j.cli.properties /conf/log4j.cli.properties
 
 RUN chmod +x -R /bookkeeper/bin && \
-    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf
+    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf /indexes
 
 ENV PATH=$PATH:/bookkkeeper/bin
 

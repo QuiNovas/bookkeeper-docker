@@ -5,6 +5,7 @@ JAVA=$(which java)
 [ -z "${BOOKIE_MIN_HEAP}" ] && export BOOKIE_MIN_HEAP=1000
 [ -z "${BOOKIE_MAX_HEAP}" ] && export BOOKIE_MAX_HEAP=1000
 [ -z "${BOOKIE_MAX_DIRECT_MEMORY}" ] && BOOKIE_MAX_DIRECT_MEMORY=2000
+[ -z "${CLUSTER_NAME}" ] && CLUSTER_NAME=bookkeeper
 
 [ -z "${GC_OPTS}" ] && GC_OPTS=" -XX:+UseG1GC \
     -XX:MaxGCPauseMillis=10 \
@@ -27,10 +28,6 @@ JAVA=$(which java)
 
 MEM_OPTS=" -Xms${BOOKIE_MIN_HEAP}m -Xmx${BOOKIE_MAX_HEAP}m -XX:MaxDirectMemorySize=${BOOKIE_MAX_DIRECT_MEMORY}m "
 
-[ -z "${PROMETHEUS_PORT}" ] && PROMETHEUS_PORT=7070
-
-[ -z "${WITHOUT_PROMETHEUS}" ] && PROMETHEUS=" -javaagent:/usr/local/bin/prometheus_agent.jar=${PROMETHEUS_PORT}:/etc/prometheus/config.yml "
-
 # Configure the classpath
 if grep -q StreamStorageLifecycleComponent /conf/bookkeeper.conf; then
   BOOKIE_SERVER_MODULE=$(find /bookkeeper/lib -type f | egrep '(org.apache.bookkeeper-)?bookkeeper-server')
@@ -47,46 +44,45 @@ NETTY_OPTS=" -Dio.netty.leakDetectionLevel=${NETTY_LEAK_DETECTION_LEVEL} \
   -Dio.netty.recycler.maxCapacity.default=${NETTY_RECYCLER_MAXCAPACITY} \
   -Dio.netty.recycler.linkCapacity=${NETTY_RECYCLER_LINKCAPACITY} "
 
-LOG_OPTS="-Dlog4j.configuration=/conf/log4j.properties \
-    -Dbookkeeper.root.logger='INFO,CONSOLE' \
-    -Dbookkeeper.log.dir=/logs \
-    -Dbookkeeper.log.file=bookkeeper.log"
+LOG_OPTS="-Dlog4j.configuration=file:/conf/log4j.properties "
 
 CMD=$(cat<<EOF
   ${JAVA}
   -Djava.net.preferIPv4Stack=true
+  ${LOG_OPTS}
   ${MEM_OPTS}
   ${GC_OPTS}
   ${GC_LOGGING}
   ${NETTY_OPTS}
-  ${PROMETHEUS}
-  ${LOG_OPTS}
   -cp ${CLASSPATH}
   ${JVM_OPTS}
 EOF
 )
 
-[ -z "${CLUSTER_NAME}" ] && CLUSTER_NAME=bookkeeper
 
-[ -z "${STREAM_STORAGE_ROOT_PATH}" ] && STREAM_STORAGE_ROOT_PATH="${CLUSTER_NAME}/stream"
+[ -z "${STREAM_STORAGE_ROOT_PATH}" ] && export STREAM_STORAGE_ROOT_PATH="/${CLUSTER_NAME}/stream"
 
 # Where Zookeeper is
-METADATA_URI=$(grep BK_metadataServiceUri /conf/bookkeeper.conf | cut -d'=' -f2 | tr -d ' ')
+METADATA_URI=$(grep metadataServiceUri /conf/bookkeeper.conf | cut -d'=' -f2 | tr -d ' ')
 
+#echo "Metadata URI is ${METADATA_URI}"
 
-ZK_HOST=$(echo "${METADATA_URI}" | egrep -o '([0-9]{1,3}\.){3}([0-9]{1,3}):[0-9]*')
+# Basically the same as METADATA_URI, just without the protocol. FYI we don't support zkServers list since it is deprecated
+ZK_HOST=$(echo "${METADATA_URI}" | sed -r 's#.*//(.*:[0-9]+).*#\1#')
+
+echo "Zookeeper host endpoint is $ZK_HOST"
 
 # The longest time in seconds to wait on a peer to init the cluster before giving up
 [ -z "${MAX_INIT_WAIT}" ] && MAX_INIT_WAIT=100
 
 # Init the cluster if we havent
-if ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat ${STREAM_STORAGE_ROOT_PATH}; then
-  echo "${STREAM_STORAGE_ROOT_PATH} does not exist in Zookeeper ${ZK_HOST}. We will try to initialize...."
+if ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat /${CLUSTER_NAME}/ledgers 2>&1 | grep -q "Node does not exist:"; then
+  echo "${CLUSTER_NAME}/ledgers does not exist in Zookeeper ${ZK_HOST}. We will try to initialize...."
   # If we can create this ephemeral node then we know that another node hasn't and we are the first to try and do an init
-  if ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} create -e ${CLUSTER_NAME}/bkInitLock; then
+  if ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} create -e /${CLUSTER_NAME}-bkInitLock locked 2>&1 | grep -q 'Node already exists:'; then
     echo "Got a lock. Running init now........"
-    if ${CMD} org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf --service-uri ${METADATA_URI} cluster init; then
-      echo "Init finished..."
+    if ${CMD} org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf cluster init -x ${CLUSTER_NAME} zk+hierarchical://${ZK_HOST}; then
+     echo "Init finished..."
     else
       echo "Init failed. Exiting..."
       exit 2
@@ -95,7 +91,7 @@ if ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat ${STREAM_
     # If we couldn't write to that node then there must be a peer that did. Lets wait on them to finish initializing
     echo "Could not get a lock on bkInitLock. Waiting on peer to initialize cluster"
     N=1
-    while ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat ${STREAM_STORAGE_ROOT_PATH}; do
+    while ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat ${STREAM_STORAGE_ROOT_PATH} 2>&1 | grep -q "Node does not exist:"; do
       echo "Waiting on peer to init cluster......"
       sleep 5
       ((N++))
@@ -109,26 +105,25 @@ else
   echo "Cluster is already initialized. Going on with our lives"
 fi
 
-# For autorecovery we have to run two separate processes
-if [ -z "${DISABLE_AUTORECOVERY}" ]; then
-  ${CMD} org.apache.bookkeeper.server.Main --conf /conf/bookkeeper.conf &
-  MAIN_PID="$!"
 
-  ${CMD} org.apache.bookkeeper.replication.AutoRecoveryMain --conf /conf/bookkeeper.conf &
-  RECOVERY_PID="$!"
-  # exit if either one fails
-  while true; do
-    if ! ps aux | grep ${RECOVERY_PID} | grep -qv grep; then
-      echo "Autorecovery has crashed"
-      exit 2
-    fi
-    if ! ps aux | grep ${MAIN_PID} | grep -qv grep; then
-      echo "Bookkeeper has crashed"
-      exit 1
-    fi
-    sleep 1
-  done
-else
-  # Only one process so we will stay in the foreground
+if [ -z "${AUTO_RECOVERY}" ]; then
+  cat<<EOF
+    ##############################################################################################
+    #                                                                                            #
+    #                                 Starting Bookie                                            #
+    #                                                                                            #
+    ##############################################################################################
+EOF
+
   ${CMD} org.apache.bookkeeper.server.Main --conf /conf/bookkeeper.conf
+else
+  cat<<EOF
+    ##############################################################################################
+    #                                                                                            #
+    #                                 Starting Autorecovery daemon                               #
+    #                                                                                            #
+    ##############################################################################################
+EOF
+
+  ${CMD} org.apache.bookkeeper.replication.AutoRecoveryMain --conf /conf/bookkeeper.conf
 fi
