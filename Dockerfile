@@ -9,7 +9,9 @@ RUN set -x && \
        wget \
       shadow && \
     apk add --no-cache bash \
+      libc6-compat \
       su-exec && \
+    ln -s /lib64/ld-linux-x86-64.so.2 /lib && \
     mkdir /journal /ledgers /logs /conf /indexes && \
     adduser -D bookkeeper && \
     cd /tmp && \
