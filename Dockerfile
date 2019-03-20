@@ -28,15 +28,12 @@ RUN set -x && \
 WORKDIR /bookkeeper
 
 COPY ./bookkeeper /bookkeeper/bin/bookkeeper
-COPY ./client /bookkeeper/bin/client
 COPY ./bookkeeper.conf /conf/bookkeeper.conf
-COPY ./client.conf /conf/client.conf
 COPY ./log4j.properties /conf/log4j.properties
-COPY ./log4j.cli.properties /conf/log4j.cli.properties
+
+ENV PATH=$PATH:/bookkeeper/bin
 
 RUN chmod +x -R /bookkeeper/bin && \
-    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf /indexes
+    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf
 
-ENV PATH=$PATH:/bookkkeeper/bin
-
-ENTRYPOINT [ "/bookkeeper/bin/bookkeeper" ]
+ENTRYPOINT [ "/bookkeeper/bin/bookkeeper -bookie" ]

@@ -157,17 +157,21 @@ EOF
     exit
     ;;
   -bkctl)
-  # Run bkctl
-  shift
-  cd /bookkeeper
-  ${CMD}org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf $@
-  exit
-  ;;
+    # Run bkctl
+    shift
+    cd /bookkeeper
+    ${CMD} org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf $@
+    exit
+    ;;
   -dlog)
+    # Start dlog
+    shift
     exec ${CMD} org.apache.distributedlog.tools.Tool org.apache.distributedlog.tools.DistributedLogTool $@
     exit
     ;;
   -dadmin)
+    # Start dlog admin
+    shift
     ${CMD} org.apache.distributedlog.tools.Tool org.apache.distributedlog.admin.DistributedLogAdmin $@
     exit
     ;;
