@@ -1,4 +1,4 @@
-FROM openjdk:8-jre-alpine
+FROM adoptopenjdk/openjdk11:x86_64-alpine-jre-11.0.2.9
 LABEL maintainer="Mathew Moon <mmoon@quinovas.com>"
 
 RUN set -x && \
@@ -9,10 +9,8 @@ RUN set -x && \
        wget \
       shadow && \
     apk add --no-cache bash \
-      libc6-compat \ 
       su-exec && \
-    ln -s /lib64/ld-linux-x86-64.so.2 /lib/ld-linux-x86-64.so.2 && \
-    mkdir /journal /ledgers /logs /conf /indexes && \
+    mkdir /journal /ledgers /logs /conf && \
     adduser -D bookkeeper && \
     cd /tmp && \
     wget -nv "https://archive.apache.org/dist/bookkeeper/bookkeeper-4.9.0/bookkeeper-server-4.9.0-bin.tar.gz" && \
