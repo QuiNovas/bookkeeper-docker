@@ -34,6 +34,6 @@ COPY ./log4j.properties /conf/log4j.properties
 ENV PATH=$PATH:/bookkeeper/bin
 
 RUN chmod +x -R /bookkeeper/bin && \
-    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf /indexes
+    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf
 
 ENTRYPOINT [ "/bookkeeper/bin/bookkeeper -bookie" ]
