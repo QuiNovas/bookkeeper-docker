@@ -9,9 +9,9 @@ RUN set -x && \
        wget \
       shadow && \
     apk add --no-cache bash \
-      libc6-compat \
+      libc6-compat \ 
       su-exec && \
-    ln -s /lib64/ld-linux-x86-64.so.2 /lib && \
+    ln -s /lib64/ld-linux-x86-64.so.2 /lib/ld-linux-x86-64.so.2 && \
     mkdir /journal /ledgers /logs /conf /indexes && \
     adduser -D bookkeeper && \
     cd /tmp && \
@@ -36,6 +36,6 @@ COPY ./log4j.properties /conf/log4j.properties
 ENV PATH=$PATH:/bookkeeper/bin
 
 RUN chmod +x -R /bookkeeper/bin && \
-    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf
+    chown -R bookkeeper:bookkeeper /bookkeeper /ledgers /logs /journal /conf /indexes
 
 ENTRYPOINT [ "/bookkeeper/bin/bookkeeper -bookie" ]
