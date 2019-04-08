@@ -97,7 +97,7 @@ function _init(){
     # If we can create this ephemeral node then we know that another node hasn't and we are the first to try and do an init
     if ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} create -e /${CLUSTER_NAME}-bkInitLock locked 2>&1 | grep -q 'Node already exists:'; then
       echo "Got a lock. Running init now........"
-      if ${CMD} org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf cluster init -x ${CLUSTER_NAME} zk+hierarchical://${ZK_HOST}; then
+      if ${CMD} org.apache.bookkeeper.tools.cli.BKCtl --conf /conf/bookkeeper.conf cluster init zk+hierarchical://${ZK_HOST}; then
        echo "Init finished..."
       else
         echo "Init failed. Exiting..."
