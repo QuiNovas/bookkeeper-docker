@@ -20,7 +20,7 @@ JAVA=$(which java)
 [ -z "${BOOKIE_MIN_HEAP}" ] && export BOOKIE_MIN_HEAP=1000
 [ -z "${BOOKIE_MAX_HEAP}" ] && export BOOKIE_MAX_HEAP=1000
 [ -z "${BOOKIE_MAX_DIRECT_MEMORY}" ] && BOOKIE_MAX_DIRECT_MEMORY=2000
-[ -z "${CLUSTER_NAME}" ] && CLUSTER_NAME=bookkeeper
+[ -z "${CLUSTER_NAME}" ] && CLUSTER_NAME=pulsar
 
 [ -z "${GC_OPTS}" ] && GC_OPTS=" -XX:+UseG1GC \
     -XX:MaxGCPauseMillis=10 \
@@ -67,7 +67,6 @@ CMD=$(cat<<EOF
   ${LOG_OPTS}
   ${MEM_OPTS}
   ${GC_OPTS}
-  ${GC_LOGGING}
   ${NETTY_OPTS}
   -cp ${CLASSPATH}
   ${JVM_OPTS}
@@ -75,7 +74,7 @@ EOF
 )
 
 
-[ -z "${STREAM_STORAGE_ROOT_PATH}" ] && export STREAM_STORAGE_ROOT_PATH="/${CLUSTER_NAME}/stream"
+[ -z "${STREAM_STORAGE_ROOT_PATH}" ] && export STREAM_STORAGE_ROOT_PATH="/stream"
 
 # Where Zookeeper is
 METADATA_URI=$(grep metadataServiceUri /conf/bookkeeper.conf | cut -d'=' -f2 | tr -d ' ')
@@ -92,8 +91,8 @@ ZK_HOST=$(echo "${METADATA_URI}" | sed -r 's#.*//(.*:[0-9]+).*#\1#')
 function _init(){
   echo "Zookeeper host endpoint is $ZK_HOST"
   # Init the cluster if we havent
-  if ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat /${CLUSTER_NAME}/ledgers 2>&1 | grep -q "Node does not exist:"; then
-    echo "${CLUSTER_NAME}/ledgers does not exist in Zookeeper ${ZK_HOST}. We will try to initialize...."
+  if ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} stat /ledgers 2>&1 | grep -q "Node does not exist:"; then
+    echo "/ledgers does not exist in Zookeeper ${ZK_HOST}. We will try to initialize...."
     # If we can create this ephemeral node then we know that another node hasn't and we are the first to try and do an init
     if ! ${CMD} org.apache.zookeeper.ZooKeeperMain -server ${ZK_HOST} create -e /${CLUSTER_NAME}-bkInitLock locked 2>&1 | grep -q 'Node already exists:'; then
       echo "Got a lock. Running init now........"
