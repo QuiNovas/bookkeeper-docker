@@ -137,6 +137,11 @@ case ${1} in
       #                                                                                            #
       ##############################################################################################
 EOF
+    if [ ! -z "${ASYNC_HOOK}" ] && [ -f "${ASYNC_HOOK}" ]; then
+      chmod +x "${ASYNC_HOOK}"
+      ${ASYNC_HOOK} &
+    fi
+
     _init
     ${CMD} org.apache.bookkeeper.server.Main --conf /conf/bookkeeper.conf
     ;;
